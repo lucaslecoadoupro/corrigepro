@@ -14,7 +14,7 @@ export function GridContent({ grid, fill, compact, teacher }) {
   const copy = fill?.copy;
   const res = copy ? computeNote(grid, copy) : null;
   const note = copy?.manualNote != null && copy.manualNote !== '' ? Number(copy.manualNote) : res?.note;
-  const showNote = copy && note != null && !copy.absent;
+  const showNote = copy && note != null && !copy.absent && !copy.missing;
   const fieldsOn = grid.fields || {};
   const scaleDiffers = Math.abs(max - grid.scale) > 0.001;
 
@@ -29,7 +29,7 @@ export function GridContent({ grid, fill, compact, teacher }) {
         <div className="gs-note">
           <div className="gs-note-label">Note</div>
           <div className={`gs-note-val ${showNote ? 'filled' : ''}`}>
-            {copy?.absent ? <span style={{ fontSize: '11pt' }}>ABS</span> : showNote ? fmt(note, 2) : <span className="blank" />}
+            {copy?.absent ? <span style={{ fontSize: '11pt' }}>ABS</span> : copy?.missing ? <span style={{ fontSize: '11pt' }}>NR</span> : showNote ? fmt(note, 2) : <span className="blank" />}
             <small> /{grid.scale}</small>
           </div>
         </div>

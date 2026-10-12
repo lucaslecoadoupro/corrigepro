@@ -156,11 +156,11 @@ export function computeNote(grid, copy) {
   return { raw, max, note, scale, filled, total: crits.length, complete: crits.length > 0 && filled === crits.length };
 }
 
-// Note d'une copie dans une évaluation (null si absent / non noté).
+// Note d'une copie dans une évaluation (null si absent / non rendu / non noté).
 // onlyDone : ne compte que les copies validées (moyennes, statistiques).
 export function copyNote(ev, studentId, onlyDone = false) {
   const c = ev.copies?.[studentId];
-  if (!c || c.absent) return null;
+  if (!c || c.absent || c.missing) return null;
   if (onlyDone && c.status !== 'done') return null;
   if (c.manualNote != null && c.manualNote !== '') return Number(c.manualNote);
   return computeNote(ev.grid, c).note;

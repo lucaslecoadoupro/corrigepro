@@ -281,6 +281,7 @@ export function ClassPage({ id, tab: initialTab }) {
 function NoteCell({ ev, studentId }) {
   const c = ev.copies?.[studentId];
   if (c?.absent) return <span className="note-chip n-x">Abs</span>;
+  if (c?.missing) return <span className="note-chip n-x" title="Copie non rendue (en attente)">NR</span>;
   const n = copyNote(ev, studentId);
   if (n == null) return <span className="note-chip n-x">–</span>;
   return <span className={`note-chip ${noteClass(to20(n, ev.grid.scale))}`} title={c?.status !== 'done' ? 'Correction en cours' : ''} style={c?.status !== 'done' ? { fontStyle: 'italic', opacity: 0.75 } : undefined}>{fmt(n, 2)}</span>;

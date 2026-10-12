@@ -14,8 +14,12 @@ const STATUS = {
   progress: { label: 'En cours', color: 'var(--warning)' },
   done: { label: 'Corrigée', color: 'var(--success)' },
   absent: { label: 'Absent', color: 'var(--text3)' },
+  missing: { label: 'Non rendu', color: 'var(--danger)' },
 };
-export const copyStatus = (c) => (c?.absent ? 'absent' : c?.status || 'todo');
+export const copyStatus = (c) => (c?.absent ? 'absent' : c?.missing ? 'missing' : c?.status || 'todo');
+// Non rendu : en attente (exclu des moyennes) jusqu'à réception de la copie, ou noté 0.
+export const setMissing = (c, on) => { c.missing = on; if (on) { c.absent = false; c.status = 'todo'; } };
+export const zeroMissing = (c) => { c.missing = false; c.absent = false; c.manualNote = 0; c.status = 'done'; if (!c.comment) c.comment = 'Copie non rendue.'; };
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Liste des évaluations
@@ -177,7 +181,7 @@ export function EvalPage({ id }) {
   const st = evalStats(ev, students);
   const total = students.length - st.absent;
 
-  const firstTodo = students.find((s) => !['done', 'absent'].includes(copyStatus(ev.copies?.[s.id])))?.id || students[0]?.id;
+  const firstTodo = students.find((s) => !['done', 'absent', 'missing'].includes(copyStatus(ev.copies?.[s.id])))?.id || students[0]?.id;
 
   const attachTo = async (sid, files) => {
     setBusy('Lecture des fichiers…');
@@ -186,12 +190,13 @@ export function EvalPage({ id }) {
       if (!pages.length) { toast('Aucune image ou PDF reconnu', 'error'); return; }
       const stored = [];
       for (const p of pages) { const pid = uid('pg'); await blobs.put(pid, p.dataUrl); stored.push({ id: pid, w: p.w, h: p.h, name: p.name }); }
-      mutate((d) => { const c = ensureCopy(findEval(d, id), sid); c.pages.push(...stored); c.absent = false; });
+      mutate((d) => { const c = ensureCopy(findEval(d, id), sid); c.pages.push(...stored); c.absent = false; c.missing = false; });
       toast(`${stored.length} page(s) ajoutée(s) à la copie`);
     } catch (e) { toast(`Import impossible : ${e.message}`, 'error'); } finally { setBusy(null); }
   };
 
-  const toggleAbsent = (sid) => mutate((d) => { const c = ensureCopy(findEval(d, id), sid); c.absent = !c.absent; });
+  const toggleAbsent = (sid) => mutate((d) => { const c = ensureCopy(findEval(d, id), sid); c.absent = !c.absent; c.missing = false; });
+  const editCopy = (sid, fn) => mutate((d) => fn(ensureCopy(findEval(d, id), sid)));
 
   const clearPages = async (sid) => {
     if (!(await confirm({ title: 'Retirer les pages de cette copie ?', danger: true, confirmLabel: 'Retirer', message: 'Les images et annotations seront supprimées. Les points saisis sont conservés.' }))) return;
@@ -261,13 +266,15 @@ export function EvalPage({ id }) {
                   </div>
                   <div style={{ fontSize: '.74rem', fontWeight: 600, color: STATUS[status].color }}><span className="status-dot" style={{ background: STATUS[status].color }} />{STATUS[status].label}</div>
                   <div style={{ textAlign: 'center' }}>
-                    {status === 'absent' ? <span className="note-chip n-x">Abs</span> : n != null ? <span className={`note-chip ${noteClass(to20(n, ev.grid.scale))}`}>{fmt(n, 2)}</span> : <span className="note-chip n-x">{res && res.filled ? '…' : '–'}</span>}
+                    {status === 'absent' ? <span className="note-chip n-x">Abs</span> : status === 'missing' ? <span className="note-chip n-x" title="Copie non rendue (en attente)">NR</span> : n != null ? <span className={`note-chip ${noteClass(to20(n, ev.grid.scale))}`}>{fmt(n, 2)}</span> : <span className="note-chip n-x">{res && res.filled ? '…' : '–'}</span>}
                   </div>
                   <div className="row" style={{ justifyContent: 'flex-end', gap: '.25rem' }}>
                     <button className="btn btn-sm" disabled={status === 'absent'} onClick={() => nav({ page: 'correct', id, student: s.id })}><Icon name="pen" />Corriger</button>
                     <Menu trigger={({ toggle }) => <button className="btn btn-quiet btn-icon btn-sm" onClick={toggle}><Icon name="more" /></button>}
                       items={[
                         { icon: 'user', label: c?.absent ? 'Marquer présent' : 'Marquer absent', onClick: () => toggleAbsent(s.id) },
+                        { icon: 'clipboard', label: c?.missing ? 'Annuler « non rendu »' : 'Marquer non rendu', onClick: () => editCopy(s.id, (x) => setMissing(x, !x.missing)) },
+                        c?.missing ? { icon: 'minus', label: 'Non rendu → mettre 0', onClick: () => editCopy(s.id, zeroMissing) } : null,
                         { icon: 'printer', label: 'Imprimer cette copie', onClick: () => setModal({ print: s.id }) },
                         (c?.pages || []).length ? { icon: 'trash', label: 'Retirer les pages numérisées', danger: true, onClick: () => clearPages(s.id) } : null,
                       ]} />
@@ -353,7 +360,7 @@ function BulkImportModal({ ev, students, onClose }) {
         for (const i of groups[g].idx) { const pid = uid('pg'); await blobs.put(pid, pages[i].dataUrl); stored.push({ id: pid, w: pages[i].w, h: pages[i].h, name: pages[i].name }); }
         plan.push([sid, stored]);
       }
-      mutate((d) => { const e = findEval(d, ev.id); plan.forEach(([sid, st]) => { const c = ensureCopy(e, sid); c.pages.push(...st); c.absent = false; }); });
+      mutate((d) => { const e = findEval(d, ev.id); plan.forEach(([sid, st]) => { const c = ensureCopy(e, sid); c.pages.push(...st); c.absent = false; c.missing = false; }); });
       toast(`${plan.length} copie(s) importée(s)`);
       onClose();
     } catch (e) { toast(`Erreur : ${e.message}`, 'error'); setSaving(false); }
@@ -436,7 +443,7 @@ export function EvalPrintDialog({ ev, cls, onlyStudent, onClose }) {
   const list = students.filter((s) => {
     const c = ev.copies?.[s.id];
     if (who === 'one') return s.id === onlyStudent;
-    if (c?.absent) return false;
+    if (c?.absent || c?.missing) return false;
     if (who === 'done') return c?.status === 'done';
     return true;
   });

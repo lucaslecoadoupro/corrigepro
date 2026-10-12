@@ -4,7 +4,7 @@ import { useNav } from '../nav.jsx';
 import { Icon } from '../icons.jsx';
 import { Empty, Menu, useBlobUrl, useConfirm } from '../ui.jsx';
 import { Shape, PEN_COLORS, HL_COLORS, unit, hitTest, rotateShape } from '../annotations.jsx';
-import { EvalPrintDialog, copyStatus } from './Evals.jsx';
+import { EvalPrintDialog, copyStatus, setMissing, zeroMissing } from './Evals.jsx';
 import { filesToPages, blobs, rotateDataUrl } from '../platform.js';
 import { uid, fmt, sortStudents, studentName, computeNote, critPoints, clamp, avatarColor, initials } from '../utils.js';
 
@@ -98,7 +98,7 @@ export function CorrectionPage({ id, student }) {
     for (let k = 1; k <= students.length; k++) {
       const n = students[(idx + k) % students.length];
       const st = copyStatus(ev.copies?.[n.id]);
-      if (st !== 'done' && st !== 'absent') return n.id;
+      if (st !== 'done' && st !== 'absent' && st !== 'missing') return n.id;
     }
     return null;
   };
@@ -148,7 +148,7 @@ export function CorrectionPage({ id, student }) {
       const pages = await filesToPages(files, setImporting);
       const stored = [];
       for (const p of pages) { const pid = uid('pg'); await blobs.put(pid, p.dataUrl); stored.push({ id: pid, w: p.w, h: p.h, name: p.name }); }
-      updateCopy((c) => { c.pages.push(...stored); c.absent = false; });
+      updateCopy((c) => { c.pages.push(...stored); c.absent = false; c.missing = false; });
       if (stored.length) toast(`${stored.length} page(s) ajoutée(s)`);
     } catch (err) { toast(`Import impossible : ${err.message}`, 'error'); } finally { setImporting(null); }
   };
@@ -172,7 +172,7 @@ export function CorrectionPage({ id, student }) {
           <select value={sid} onChange={(e) => setSid(e.target.value)}>
             {students.map((x) => {
               const st = copyStatus(ev.copies?.[x.id]);
-              return <option key={x.id} value={x.id}>{st === 'done' ? '✓ ' : st === 'absent' ? '⊘ ' : st === 'progress' ? '• ' : '   '}{studentName(x, data.settings.nameOrder)}</option>;
+              return <option key={x.id} value={x.id}>{st === 'done' ? '✓ ' : st === 'absent' ? '⊘ ' : st === 'missing' ? '✗ ' : st === 'progress' ? '• ' : '   '}{studentName(x, data.settings.nameOrder)}</option>;
             })}
           </select>
           <button className="btn btn-ghost btn-sm" disabled={idx >= students.length - 1} onClick={() => go(1)} title="Élève suivant (Alt+→)"><Icon name="chevronRight" /></button>
@@ -199,7 +199,8 @@ export function CorrectionPage({ id, student }) {
         <div className="corr-split" onPointerDown={startResize} title="Redimensionner" />
         <div className="corr-right" style={{ width: rightW }}>
           <ScorePanel key={sid} ev={ev} copy={copy} student={s} updateCopy={updateCopy} onValidate={validate} settings={data.settings}
-            onAbsent={() => updateCopy((c) => { c.absent = !c.absent; if (c.absent) c.status = 'todo'; })} />
+            onAbsent={() => updateCopy((c) => { c.absent = !c.absent; c.missing = false; if (c.absent) c.status = 'todo'; })}
+            onMissing={() => updateCopy((c) => setMissing(c, !c.missing))} onZero={() => updateCopy(zeroMissing)} />
         </div>
       </div>
       {printing && <EvalPrintDialog ev={ev} cls={cls} onlyStudent={sid} onClose={() => setPrinting(false)} />}
@@ -471,7 +472,7 @@ function quickValues(max) {
   return [0, max / 4, max / 2, (3 * max) / 4, max].map((x) => Math.round(x * 2) / 2);
 }
 
-function ScorePanel({ ev, copy, student, updateCopy, onValidate, onAbsent, settings }) {
+function ScorePanel({ ev, copy, student, updateCopy, onValidate, onAbsent, onMissing, onZero, settings }) {
   const grid = ev.grid;
   const res = computeNote(grid, copy);
   const manual = copy?.manualNote != null && copy.manualNote !== '';
@@ -497,7 +498,7 @@ function ScorePanel({ ev, copy, student, updateCopy, onValidate, onAbsent, setti
   return (
     <>
       <div className="score-hero">
-        <div className="score-big" style={{ color: noteColor }}>{copy?.absent ? 'Abs' : note == null ? '–' : fmt(note, 2)}<small> /{grid.scale}</small></div>
+        <div className="score-big" style={{ color: noteColor }}>{copy?.absent ? 'Abs' : copy?.missing ? 'NR' : note == null ? '–' : fmt(note, 2)}<small> /{grid.scale}</small></div>
         <div className="score-meta" style={{ flex: 1 }}>
           <div style={{ fontWeight: 700, color: 'var(--text)', fontSize: '.84rem' }}>{studentName(student, 'prenom')}</div>
           <div>{manual ? 'Note saisie manuellement' : `${fmt(res.raw, 2)} / ${fmt(res.max, 2)} pts · ${res.filled}/${res.total} critères`}</div>
@@ -508,6 +509,7 @@ function ScorePanel({ ev, copy, student, updateCopy, onValidate, onAbsent, setti
             { icon: 'sparkles', label: 'Tout au maximum', onClick: fullMarks },
             { icon: 'edit', label: showManual ? 'Masquer la note manuelle' : 'Saisir la note manuellement', onClick: () => setShowManual(!showManual) },
             { icon: 'user', label: copy?.absent ? 'Marquer présent(e)' : 'Marquer absent(e)', onClick: onAbsent },
+            { icon: 'clipboard', label: copy?.missing ? 'Annuler « non rendu »' : 'Marquer non rendu', onClick: onMissing },
             '-',
             { icon: 'undo', label: 'Réinitialiser la notation', danger: true, onClick: reset },
           ]} />
@@ -572,10 +574,14 @@ function ScorePanel({ ev, copy, student, updateCopy, onValidate, onAbsent, setti
       </div>
 
       <div className="panel-ft">
+        {status === 'missing' && <>
+          <div className="faint" style={{ fontSize: '.74rem', textAlign: 'center' }}>Copie non rendue : exclue des moyennes en attendant.</div>
+          <button className="btn btn-block" onClick={onZero}><Icon name="minus" />Mettre 0 et valider</button>
+        </>}
         {status === 'done'
           ? <button className="btn btn-block" onClick={() => updateCopy((c) => { c.status = 'progress'; })}><Icon name="edit" />Rouvrir la copie</button>
           : null}
-        <button className="btn btn-success btn-block" onClick={onValidate} disabled={copy?.absent} title="Ctrl/Cmd + Entrée">
+        <button className="btn btn-success btn-block" onClick={onValidate} disabled={copy?.absent || copy?.missing} title="Ctrl/Cmd + Entrée">
           <Icon name="check" />{status === 'done' ? 'Copie suivante' : 'Valider et passer à la suivante'}
         </button>
       </div>
