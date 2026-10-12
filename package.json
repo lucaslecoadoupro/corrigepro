@@ -1,7 +1,7 @@
 {
   "name": "corrigepro",
   "productName": "CorrigePro",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "CorrigePro — correction de copies et grilles d'évaluation pour enseignants (famille ClassPro)",
   "main": "src/main/main.js",
   "author": {
