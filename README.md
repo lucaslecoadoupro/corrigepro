@@ -28,6 +28,15 @@
 - « Valider et passer à la suivante » (Ctrl/Cmd + Entrée) enchaîne les copies non corrigées.
 - **Impression** : copie annotée + grille complétée **côte à côte en paysage** (comme à l'écran) ou **copie puis grille en portrait** ; ou grilles complétées seules (2 par feuille). **Export PDF** direct.
 
+### Appli mobile (téléphone & tablette) et synchro
+- **Appli mobile complète** (PWA) : la même appli, adaptée aux petits écrans (barre d'onglets, correction « Copie / Grille »), installable via « Ajouter à l'écran d'accueil », fonctionne hors ligne. Publiée sur GitHub Pages (`npm run build:pwa` → `dist-pwa/`).
+- **Synchro par fichier, sans compte ni internet** (menu « Synchroniser ») : chaque appareil envoie un petit fichier (AirDrop, Quick Share, Drive, mail…). Les changements sont **fusionnés** élément par élément (classe, grille, évaluation, copie d'un élève) : la modification la plus récente gagne, rien n'est écrasé en bloc.
+- Sur l'ordinateur, les fichiers reçus dans le **dossier surveillé** (Téléchargements par défaut, ou un dossier Drive / OneDrive / iCloud) sont importés automatiquement. Sur Android, « Partager vers CorrigePro » ouvre directement le fichier dans l'appli.
+
+### Participation orale & saisie rapide
+- Modèle de grille **Participation orale** (fréquence, pertinence, langue, écoute).
+- **Saisie rapide** : tableau élèves × critères sur la page de l'évaluation, sans copie numérisée ; une ligne complète est validée automatiquement.
+
 Raccourcis de correction : `P` stylo · `S` surligneur · `U` souligner · `V` vague · `O` entourer · `T` texte · `M` tampon · `E` gomme · `H` déplacer · `Ctrl/Cmd+Z` annuler · `Alt+←/→` élève précédent/suivant · `Ctrl/Cmd+molette` zoom.
 
 ## Données

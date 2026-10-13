@@ -3,21 +3,83 @@
 // données dans un fichier JSON, copies scannées en fichiers JPEG.
 // En version navigateur, repli sur localStorage + IndexedDB.
 
+import { uid } from './utils.js';
+
 const api = typeof window !== 'undefined' ? window.corrigepro : null;
 export const isDesktop = !!api;
 export const isMac = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform || navigator.userAgent);
 
 const LS_KEY = 'corrigepro-data-v1';
 
+// Navigateur / appli mobile : IndexedDB (pas de limite à 5 Mo comme localStorage).
+// Repli sur localStorage si IndexedDB est indisponible (navigation privée…).
+let dataDbPromise = null;
+function dataDb() {
+  dataDbPromise = dataDbPromise || new Promise((res, rej) => {
+    try {
+      const req = indexedDB.open('corrigepro-data', 1);
+      req.onupgradeneeded = () => req.result.createObjectStore('kv');
+      req.onsuccess = () => res(req.result);
+      req.onerror = () => rej(req.error);
+    } catch (e) { rej(e); }
+  });
+  return dataDbPromise;
+}
+const idbReq = (mode, fn) => dataDb().then((db) => new Promise((res, rej) => {
+  const tx = db.transaction('kv', mode);
+  const r = fn(tx.objectStore('kv'));
+  tx.oncomplete = () => res(r?.result);
+  tx.onerror = () => rej(tx.error);
+}));
+
 export async function loadData() {
   if (api) return api.loadData();
+  // Demande au navigateur de ne pas effacer les données (important sur iPhone / iPad)
+  try { navigator.storage?.persist?.(); } catch { /* facultatif */ }
+  try {
+    const d = await idbReq('readonly', (st) => st.get('data'));
+    if (d) return d;
+  } catch { /* repli localStorage */ }
   try { const raw = localStorage.getItem(LS_KEY); return raw ? JSON.parse(raw) : null; } catch { return null; }
 }
 
 export async function saveData(data) {
   if (api) return api.saveData(data);
-  try { localStorage.setItem(LS_KEY, JSON.stringify(data)); return { ok: true }; } catch (e) { return { ok: false, error: String(e) }; }
+  try {
+    await idbReq('readwrite', (st) => st.put(data, 'data'));
+    try { localStorage.removeItem(LS_KEY); } catch { /* ancienne copie : sans gravité */ }
+    return { ok: true };
+  } catch {
+    try { localStorage.setItem(LS_KEY, JSON.stringify(data)); return { ok: true }; } catch (e) { return { ok: false, error: String(e) }; }
+  }
 }
+
+// ── Synchro par fichier ─────────────────────────────────────────────────────
+export function deviceName() {
+  if (api) return isMac ? 'Mac' : 'PC';
+  const ua = navigator.userAgent;
+  if (/iPad|Macintosh/.test(ua) && navigator.maxTouchPoints > 1) return 'iPad';
+  if (/iPhone/.test(ua)) return 'iPhone';
+  if (/Android/.test(ua)) return /Mobile/.test(ua) ? 'téléphone Android' : 'tablette Android';
+  return 'navigateur';
+}
+
+export const syncIO = {
+  watch: (dir) => (api?.syncWatch ? api.syncWatch(dir) : Promise.resolve({ on: false })),
+  pickDir: () => (api?.syncPickDir ? api.syncPickDir() : Promise.resolve(null)),
+  onIncoming: (cb) => (api?.onSyncIncoming ? api.onSyncIncoming(cb) : () => {}),
+  // mode 'share' : menu de partage (mobile, macOS) ; 'save' : enregistrer le fichier
+  async send(name, text, { dir, mode = 'share' } = {}) {
+    if (api) return api.syncShare({ name, text, dir, mode });
+    const file = new File([text], name, { type: 'application/json' });
+    if (mode === 'share' && navigator.canShare?.({ files: [file] })) {
+      try { await navigator.share({ files: [file], title: 'Synchro CorrigePro' }); return { ok: true, shared: true }; } catch (e) { if (e.name === 'AbortError') return { ok: false }; }
+    }
+    const { downloadText } = await import('./utils.js');
+    downloadText(name, text);
+    return { ok: true, downloaded: true };
+  },
+};
 
 export async function appInfo() {
   if (api) return api.getInfo();
@@ -155,6 +217,17 @@ export async function filesToPages(files, onProgress) {
     }
   }
   return out;
+}
+
+// Enregistre des pages importées et renvoie leurs références pour copy.pages
+export async function storePages(pages) {
+  const stored = [];
+  for (const p of pages) {
+    const id = uid('pg');
+    await blobs.put(id, p.dataUrl);
+    stored.push({ id, w: p.w, h: p.h, name: p.name });
+  }
+  return stored;
 }
 
 // Rotation d'une page de 90° (sens horaire) → nouvelle image

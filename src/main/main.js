@@ -1,8 +1,9 @@
 // CorrigePro — processus principal Electron
-const { app, BrowserWindow, ipcMain, dialog, shell, protocol, net, Menu, nativeTheme } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, protocol, net, Menu, nativeTheme, ShareMenu } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const { pathToFileURL } = require('url');
+const crypto = require('crypto');
 
 const isMac = process.platform === 'darwin';
 const isDev = process.argv.includes('--dev');
@@ -107,6 +108,96 @@ ipcMain.handle('data:load', () => {
 
 ipcMain.handle('data:save', (_e, data) => {
   try { ensureDirs(); writeAtomic(dataFile(), JSON.stringify(data)); return { ok: true }; } catch (err) { return { ok: false, error: String(err) }; }
+});
+
+// ── IPC : synchro par fichier avec le téléphone / la tablette ───────────────
+// Les fichiers reçus (AirDrop, Quick Share, Drive…) qui arrivent dans le dossier surveillé
+// sont transmis au renderer, fusionnés, puis rangés dans data/synchro-recue.
+const SYNC_PREFIX = 'CorrigePro-synchro';
+let syncWatcher = null;
+const syncSeen = new Set();
+
+function readWhenStable(file, tries = 8) {
+  return new Promise((resolve) => {
+    let last = -1;
+    const tick = (n) => {
+      let size = -1;
+      try { size = fs.statSync(file).size; } catch (_) { return resolve(null); }
+      if (size > 0 && size === last) { try { return resolve(fs.readFileSync(file, 'utf8')); } catch (_) { return resolve(null); } }
+      last = size;
+      if (n <= 0) return resolve(null);
+      setTimeout(() => tick(n - 1), 600);
+    };
+    tick(tries);
+  });
+}
+
+function askRenderer(channel, payload) {
+  if (!win || win.isDestroyed()) return Promise.resolve(null);
+  const id = crypto.randomUUID();
+  return new Promise((resolve) => {
+    const done = (_e, rid, res) => { if (rid !== id) return; ipcMain.removeListener(`${channel}-done`, done); clearTimeout(t); resolve(res); };
+    const t = setTimeout(() => { ipcMain.removeListener(`${channel}-done`, done); resolve(null); }, 30000);
+    ipcMain.on(`${channel}-done`, done);
+    win.webContents.send(channel, id, payload);
+  });
+}
+
+async function importSyncFile(file) {
+  const name = path.basename(file);
+  if (syncSeen.has(name)) return;
+  syncSeen.add(name);
+  const text = await readWhenStable(file);
+  if (!text) { syncSeen.delete(name); return; }
+  const res = await askRenderer('sync:incoming', { name, text });
+  // 'applied' : rangé ; 'own' (fichier envoyé par cet ordinateur) ou erreur : laissé en place
+  if (res === 'applied') {
+    try {
+      const dest = path.join(dataDir(), 'synchro-recue');
+      fs.mkdirSync(dest, { recursive: true });
+      fs.renameSync(file, path.join(dest, name));
+    } catch (_) { /* fichier déjà déplacé ou en lecture seule : sans gravité */ }
+  }
+  if (res == null) syncSeen.delete(name);
+}
+
+function scanSyncDir(dir) {
+  let names = [];
+  try { names = fs.readdirSync(dir); } catch (_) { return; }
+  names.filter((n) => n.startsWith(SYNC_PREFIX) && n.endsWith('.json')).forEach((n) => importSyncFile(path.join(dir, n)));
+}
+
+ipcMain.handle('sync:watch', (_e, dir) => {
+  if (syncWatcher) { syncWatcher.close(); syncWatcher = null; }
+  if (!dir) return { on: false };
+  const target = dir === 'downloads' ? app.getPath('downloads') : dir;
+  try {
+    let timer = null;
+    syncWatcher = fs.watch(target, () => { clearTimeout(timer); timer = setTimeout(() => scanSyncDir(target), 400); });
+    scanSyncDir(target);
+    return { on: true, dir: target };
+  } catch (err) { return { on: false, error: String(err) }; }
+});
+
+ipcMain.handle('sync:pick-dir', async () => {
+  const r = await dialog.showOpenDialog(win, { properties: ['openDirectory', 'createDirectory'], title: 'Dossier où arrivent les fichiers du téléphone' });
+  return r.canceled ? null : r.filePaths[0];
+});
+
+// Envoi : menu de partage macOS (AirDrop, Mail…) ou enregistrement dans un dossier
+ipcMain.handle('sync:share', async (_e, { name, text, dir, mode }) => {
+  if (mode === 'share' && isMac) {
+    const tmp = path.join(app.getPath('temp'), name);
+    fs.writeFileSync(tmp, text);
+    new ShareMenu({ filePaths: [tmp] }).popup({ window: win });
+    return { ok: true, shared: true };
+  }
+  const base = dir && dir !== 'downloads' ? dir : app.getPath('downloads');
+  const r = await dialog.showSaveDialog(win, { defaultPath: path.join(base, name), filters: [{ name: 'Synchro CorrigePro', extensions: ['json'] }] });
+  if (r.canceled) return { ok: false };
+  syncSeen.add(path.basename(r.filePath)); // ne pas se ré-importer soi-même
+  fs.writeFileSync(r.filePath, text);
+  return { ok: true, path: r.filePath };
 });
 
 ipcMain.handle('data:open-folder', () => { ensureDirs(); shell.openPath(dataDir()); });

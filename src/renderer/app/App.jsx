@@ -10,24 +10,36 @@ import { GridsPage, GridEditorPage } from './modules/Grids.jsx';
 import { EvalsPage, EvalPage } from './modules/Evals.jsx';
 import { CorrectionPage } from './modules/Correction.jsx';
 import { SettingsPage } from './modules/Settings.jsx';
+import { SyncModal, useSyncReceiver, syncPending } from './modules/Sync.jsx';
 
 const NAV = [
-  { section: 'Vue générale', items: [{ id: 'home', icon: 'home', label: 'Accueil', match: ['home'] }] },
+  { section: 'Vue générale', items: [{ id: 'home', icon: 'home', label: 'Accueil', short: 'Accueil', match: ['home'] }] },
   { section: 'Mes classes', items: [
-    { id: 'classes', icon: 'users', label: 'Classes & élèves', match: ['classes'] },
-    { id: 'results', icon: 'trend', label: 'Résultats & évolution', match: ['class'] },
+    { id: 'classes', icon: 'users', label: 'Classes & élèves', short: 'Classes', match: ['classes'] },
+    { id: 'results', icon: 'trend', label: 'Résultats & évolution', short: 'Résultats', match: ['class'], mobile: 'hide' },
   ] },
   { section: 'Évaluation', items: [
-    { id: 'grids', icon: 'grid', label: 'Grilles d\'évaluation', match: ['grids', 'grid'] },
-    { id: 'evals', icon: 'clipboard', label: 'Évaluations & copies', match: ['evals', 'eval', 'correct'] },
+    { id: 'grids', icon: 'grid', label: 'Grilles d\'évaluation', short: 'Grilles', match: ['grids', 'grid'] },
+    { id: 'evals', icon: 'clipboard', label: 'Évaluations & copies', short: 'Évals', match: ['evals', 'eval', 'correct'] },
   ] },
-  { section: 'Application', items: [{ id: 'settings', icon: 'settings', label: 'Réglages', match: ['settings'] }] },
+  { section: 'Application', items: [
+    { id: 'sync', icon: 'arrowUpDown', label: 'Synchroniser', short: 'Synchro', match: [] },
+    { id: 'settings', icon: 'settings', label: 'Réglages', short: 'Réglages', match: ['settings'] },
+  ] },
 ];
+
+function useMedia(q) {
+  const [m, setM] = useState(() => window.matchMedia(q).matches);
+  useEffect(() => { const mq = window.matchMedia(q); const f = () => setM(mq.matches); mq.addEventListener('change', f); return () => mq.removeEventListener('change', f); }, [q]);
+  return m;
+}
 
 export function App() {
   const { data, mutate, saveState } = useStore();
   const [route, setRoute] = useState({ page: 'home' });
   const [version, setVersion] = useState('1.0.0');
+  const [syncOpen, setSyncOpen] = useState(false);
+  const receiveSync = useSyncReceiver();
   const [collapsedPref, setCollapsedPref] = useState(() => localStorage.getItem('cp-sb-collapsed') === '1');
 
   useEffect(() => { appInfo().then((i) => i?.version && setVersion(i.version)); }, []);
@@ -38,6 +50,7 @@ export function App() {
   useEffect(() => { localStorage.setItem('cp-sb-collapsed', collapsedPref ? '1' : '0'); }, [collapsedPref]);
 
   const nav = useMemo(() => (r) => {
+    if (r.page === 'sync') { setSyncOpen(true); return; }
     if (r.page === 'results') {
       const c = data.classes.find((x) => x.id === localStorage.getItem('cp-last-class')) || data.classes[0];
       setRoute(c ? { page: 'class', id: c.id, tab: 'results' } : { page: 'classes' });
@@ -48,7 +61,9 @@ export function App() {
   }, [data.classes]);
 
   const toCorrect = data.evals.reduce((s, e) => { const c = findClass(data, e.classId); return s + (c ? evalStats(e, c.students).todo : 0); }, 0);
-  const collapsed = collapsedPref || route.page === 'correct';
+  const phone = useMedia('(max-width: 760px)'); // barre d'onglets en bas
+  const narrow = useMedia('(max-width: 1100px)'); // tablette : menu replié pour laisser la place
+  const collapsed = collapsedPref || route.page === 'correct' || narrow;
   const p = data.profile;
   const who = [p.prenom, p.nom].filter(Boolean).join(' ');
 
@@ -67,7 +82,7 @@ export function App() {
 
   return (
     <NavCtx.Provider value={nav}>
-      <div className="shell">
+      <div className={`shell ${route.page === 'correct' ? 'correcting' : ''}`}>
         <aside className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
           <div className="sb-drag" />
           <div className="sb-logo" style={collapsed ? { justifyContent: 'center', padding: '.875rem .4rem' } : undefined}>
@@ -79,14 +94,14 @@ export function App() {
               <div key={sec.section}>
                 {!collapsed ? <div className="sb-section-label">{sec.section}</div> : <div style={{ height: '.6rem' }} />}
                 {sec.items.map((it) => {
-                  const on = it.match.includes(route.page);
-                  const badge = it.id === 'evals' && toCorrect ? toCorrect : it.id === 'classes' && data.classes.length ? data.classes.length : null;
+                  const on = it.match.includes(route.page) || (phone && it.id === 'classes' && route.page === 'class');
+                  const badge = it.id === 'sync' ? (syncPending(data) || null) : it.id === 'evals' && toCorrect ? toCorrect : it.id === 'classes' && data.classes.length ? data.classes.length : null;
                   return (
-                    <button key={it.id} className={`sb-item ${on ? 'on' : ''}`} onClick={() => nav({ page: it.id })} title={collapsed ? it.label : undefined}
-                      style={collapsed ? { justifyContent: 'center', padding: '.55rem 0' } : undefined}>
+                    <button key={it.id} className={`sb-item ${on ? 'on' : ''}`} data-mobile={it.mobile} onClick={() => nav({ page: it.id })} title={collapsed ? it.label : undefined}
+                      style={collapsed && !phone ? { justifyContent: 'center', padding: '.55rem 0' } : undefined}>
                       <Icon name={it.icon} />
-                      {!collapsed && <span>{it.label}</span>}
-                      {!collapsed && badge != null && <span className="sb-badge">{badge}</span>}
+                      {(!collapsed || phone) && <span>{phone ? it.short : it.label}</span>}
+                      {(!collapsed || phone) && badge != null && <span className="sb-badge">{badge}</span>}
                     </button>
                   );
                 })}
@@ -116,6 +131,7 @@ export function App() {
         </aside>
         <main className="main-area">{page}</main>
       </div>
+      {syncOpen && <SyncModal receive={receiveSync} onClose={() => setSyncOpen(false)} />}
     </NavCtx.Provider>
   );
 }

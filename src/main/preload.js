@@ -12,4 +12,12 @@ contextBridge.exposeInMainWorld('corrigepro', {
   print: (opts) => ipcRenderer.invoke('print:system', opts),
   printToPdf: (opts) => ipcRenderer.invoke('print:pdf', opts),
   exportBackup: (opts) => ipcRenderer.invoke('backup:export', opts),
+  syncWatch: (dir) => ipcRenderer.invoke('sync:watch', dir),
+  syncPickDir: () => ipcRenderer.invoke('sync:pick-dir'),
+  syncShare: (opts) => ipcRenderer.invoke('sync:share', opts),
+  onSyncIncoming: (cb) => {
+    const h = async (_e, id, payload) => { let res = 'error'; try { res = await cb(payload); } catch (_) { /* res = error */ } ipcRenderer.send('sync:incoming-done', id, res); };
+    ipcRenderer.on('sync:incoming', h);
+    return () => ipcRenderer.removeListener('sync:incoming', h);
+  },
 });

@@ -568,6 +568,75 @@ input, textarea, [contenteditable] { user-select: text; }
 /* Le conteneur d'impression est mis en page hors écran (et non masqué) pour
    que les grilles puissent mesurer leur contenu et s'ajuster à la feuille. */
 #print-root { position: fixed; left: -30000px; top: 0; visibility: hidden; pointer-events: none; }
+.modal .thumb-mini { width: 60px; height: 80px; }
+/* ── PETITS ÉCRANS : tablette & téléphone ───────────────────────────────── */
+.pane-switch { display: none; }
+@media (hover: none) { .page-tools { opacity: 1; } }
+@media (max-width: 1100px) {
+  .corr-right { width: 360px !important; }
+  .editor { grid-template-columns: 1fr; }
+  .editor-preview { position: static; }
+}
+@media (max-width: 760px) {
+  .shell { flex-direction: column-reverse; height: 100dvh; }
+  /* Menu latéral → barre d'onglets en bas */
+  .sidebar, .sidebar.collapsed { width: 100%; height: auto; flex-direction: row; padding: 0 0 env(safe-area-inset-bottom); border-top: 1px solid rgba(255,255,255,.08); }
+  .sb-drag, .sb-logo, .sb-footer, .sb-section-label { display: none !important; }
+  .sb-nav { display: flex; padding: .3rem .25rem; overflow: visible; }
+  .sb-nav > div { display: contents; }
+  .sb-item, .sidebar.collapsed .sb-item { flex: 1; flex-direction: column; gap: .15rem; padding: .35rem .1rem !important; font-size: .58rem; justify-content: center; position: relative; min-width: 0; }
+  .sb-item span:not(.sb-badge) { display: block !important; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+  .sb-item[data-mobile="hide"] { display: none; }
+  .sb-badge { position: absolute; top: .1rem; right: calc(50% - 1.4rem); font-size: .55rem; padding: 0 .3rem; }
+  .page-hd { padding: calc(.8rem + env(safe-area-inset-top)) 1rem .8rem; }
+  .phd-title { font-size: 1.1rem; }
+  .phd-actions { width: 100%; }
+  .phd-actions .btn { padding: .42rem .7rem; }
+  .phd-stats { grid-template-columns: repeat(2, 1fr); }
+  .phstat-value { font-size: 1.15rem; }
+  .page-content { padding: .9rem .9rem 1.5rem; }
+  .grid-2, .grid-3 { grid-template-columns: 1fr; }
+  .grid-2 > *, .grid-3 > *, .grid-auto > * { min-width: 0; }
+  .grid-auto { grid-template-columns: 1fr; }
+  .quick-actions { grid-template-columns: repeat(2, 1fr); gap: .6rem; }
+  .hero-welcome { flex-direction: column; align-items: flex-start !important; }
+  .list-item { padding: .65rem .8rem; }
+  .li-progress { display: none; }
+  .card-hd { flex-wrap: wrap; }
+  .editor > *, .stack > *, .field { min-width: 0; }
+  .seg { flex-wrap: wrap; max-width: 100%; }
+  .seg.block button { white-space: normal; }
+  .editor .row { flex-wrap: wrap; }
+  .editor .row > .field { flex: 1 1 140px !important; }
+  /* Fenêtres → feuilles plein écran depuis le bas */
+  .modal-back { padding: 0; align-items: flex-end; }
+  .modal { width: 100% !important; max-height: 94dvh; border-radius: 16px 16px 0 0; }
+  .modal-ft { padding-bottom: calc(.8rem + env(safe-area-inset-bottom)); flex-wrap: wrap; }
+  .toast-wrap { left: .75rem; right: .75rem; bottom: calc(4.5rem + env(safe-area-inset-bottom)); }
+  .toast { min-width: 0; }
+  /* Liste des copies : élève, note, actions */
+  .copy-row { grid-template-columns: 30px 1fr auto auto; gap: .5rem; padding: .55rem .75rem; }
+  .copy-row > :nth-child(3), .copy-row > :nth-child(4) { display: none; }
+  .crit-edit { grid-template-columns: 20px 1fr 64px 28px; }
+  /* Correction : copie OU grille, au choix */
+  .corr { height: 100dvh; }
+  .corr-bar { flex-wrap: wrap; padding: calc(.5rem + env(safe-area-inset-top)) .6rem .5rem; gap: .4rem; }
+  .corr-bar .corr-title { display: none; }
+  .corr-bar .spacer, .student-switch .avatar { display: none; }
+  .corr-bar > .btn { padding: .35rem .5rem; }
+  .shell.correcting .sidebar { display: none; }
+  .student-switch { flex: 1; min-width: 0; }
+  .student-switch select { max-width: none; flex: 1; min-width: 0; }
+  .pane-switch { display: block; padding: .4rem .6rem; background: var(--surface); border-bottom: 1px solid var(--border); }
+  .corr-split { display: none; }
+  .corr-main[data-pane="copy"] .corr-right, .corr-main[data-pane="grid"] .corr-left { display: none; }
+  .corr-right { width: 100% !important; border-left: none; }
+  .toolbar { overflow-x: auto; flex-wrap: nowrap; }
+  .viewer { padding: .75rem; }
+  .page-tools { right: .3rem; }
+  .qbtn { min-width: 36px; height: 34px; }
+}
+
 @media print {
   html, body, #root { height: auto !important; overflow: visible !important; background: #fff !important; }
   body > *:not(#print-root) { display: none !important; }

@@ -8,7 +8,7 @@ import { PrintDialog } from '../print.jsx';
 import { GRID_TYPES, SCALES, ROUNDINGS, SOCLE_LEVELS, newGrid } from '../templates.js';
 import { uid, deep, gridMax, fmt, fmtDate, sortStudents, studentName, todayISO, debounce } from '../utils.js';
 
-const TYPE_COLORS = { ee: '#3b5bdb', eo: '#7c3aed', ce: '#0891b2', co: '#0f9b6e', ctrl: '#d97706', tf: '#db2777', comp: '#4d7c0f', custom: '#475569' };
+const TYPE_COLORS = { ee: '#3b5bdb', eo: '#7c3aed', part: '#9333ea', 'part-custom': '#9333ea', ce: '#0891b2', co: '#0f9b6e', ctrl: '#d97706', tf: '#db2777', comp: '#4d7c0f', custom: '#475569' };
 
 export function teacherLine(data) {
   const p = data.profile;
@@ -93,8 +93,9 @@ export function GridsPage() {
 export function NewGridModal({ onClose, onCreated }) {
   const { mutate } = useStore();
   const [type, setType] = useState('ee');
+  const [title, setTitle] = useState('');
   const create = () => {
-    const g = newGrid(type);
+    const g = newGrid(type, title);
     mutate((d) => { d.grids.push(g); });
     onCreated?.(g.id);
     onClose();
@@ -102,6 +103,9 @@ export function NewGridModal({ onClose, onCreated }) {
   return (
     <Modal title="Nouvelle grille" sub="Choisissez un type d'évaluation pour partir d'un modèle" icon="grid" onClose={onClose}
       footer={<><button className="btn" onClick={onClose}>Annuler</button><button className="btn btn-primary" onClick={create}><Icon name="arrowRight" />Créer et personnaliser</button></>}>
+      <Field label="Nom de la grille (facultatif)" style={{ marginBottom: '.85rem' }}>
+        <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder={GRID_TYPES.find((t) => t.id === type)?.label} />
+      </Field>
       <div className="type-grid">
         {GRID_TYPES.map((t) => (
           <button key={t.id} className={`type-opt ${type === t.id ? 'on' : ''}`} onClick={() => setType(t.id)} onDoubleClick={() => { setType(t.id); setTimeout(create, 0); }}>
@@ -215,6 +219,7 @@ export function GridEditorPage({ id }) {
                     <select className="select" value={g.rounding} onChange={(e) => set({ rounding: e.target.value })}>{ROUNDINGS.map((r) => <option key={r.v} value={r.v}>{r.label}</option>)}</select>
                   </Field>
                 </div>
+                <Switch checked={!!g.direct} onChange={(v) => set({ direct: v })} label="Saisie directe des notes (participation, oral) : pas de copie à importer, saisie possible sur téléphone" />
                 {g.mode === 'niveaux' && (
                   <div>
                     <div className="field-label" style={{ marginBottom: '.35rem' }}>Niveaux (part des points du critère)</div>

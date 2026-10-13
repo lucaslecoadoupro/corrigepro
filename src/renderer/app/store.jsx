@@ -2,6 +2,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import { loadData, saveData, blobs } from './platform.js';
 import { deep, debounce, uid } from './utils.js';
 import { DEFAULT_QUICK_COMMENTS, DEFAULT_STAMPS } from './templates.js';
+import { fingerprints, stampChanges, mergeSync, ensureSync } from './sync.js';
 
 export const DATA_VERSION = 1;
 
@@ -41,20 +42,26 @@ export function StoreProvider({ children }) {
   const [data, setData] = useState(null);
   const [saveState, setSaveState] = useState('saved');
   const dataRef = useRef(null);
+  const fpRef = useRef(new Map()); // empreintes du dernier état enregistré (synchro)
 
   const persist = useMemo(() => debounce(async (d) => {
+    // Date les éléments modifiés depuis le dernier enregistrement (le champ sync n'est pas affiché)
+    fpRef.current = stampChanges(fpRef.current, d);
     const r = await saveData(d);
     setSaveState(r?.ok === false ? 'error' : 'saved');
   }, 450), []);
 
   useEffect(() => {
-    loadData().then((d) => { const m = migrate(d); dataRef.current = m; setData(m); });
+    loadData().then((d) => { const m = migrate(d); ensureSync(m); fpRef.current = fingerprints(m); dataRef.current = m; setData(m); });
   }, []);
 
   useEffect(() => {
     const flush = () => dataRef.current && persist.flush(dataRef.current);
+    // Mobile : l'appli peut être fermée sans « beforeunload » ; on enregistre dès qu'elle passe en arrière-plan
+    const hide = () => { if (document.visibilityState === 'hidden') flush(); };
     window.addEventListener('beforeunload', flush);
-    return () => window.removeEventListener('beforeunload', flush);
+    document.addEventListener('visibilitychange', hide);
+    return () => { window.removeEventListener('beforeunload', flush); document.removeEventListener('visibilitychange', hide); };
   }, [persist]);
 
   // mutate(fn) : fn reçoit un brouillon (copie profonde) à modifier directement
@@ -69,14 +76,32 @@ export function StoreProvider({ children }) {
     });
   }, [persist]);
 
+  // Fusion d'un fichier de synchro reçu. Les éléments reçus gardent leur date d'origine.
+  const applySync = useCallback((file) => {
+    const n = deep(dataRef.current);
+    stampChanges(fpRef.current, n); // dater d'abord les modifications locales pas encore enregistrées
+    const sum = mergeSync(n, file);
+    fpRef.current = fingerprints(n);
+    dataRef.current = n;
+    setData(n);
+    persist.flush(n);
+    return sum;
+  }, [persist]);
+
   const replaceAll = useCallback((d) => {
     const m = migrate(d);
+    // Restauration / remise à zéro : on repart sans historique de synchro, pour ne pas
+    // propager des suppressions en masse vers les autres appareils.
+    const device = dataRef.current?.sync?.device;
+    m.sync = device ? { device } : undefined;
+    ensureSync(m);
+    fpRef.current = fingerprints(m);
     dataRef.current = m;
     setData(m);
     persist.flush(m);
   }, [persist]);
 
-  const value = useMemo(() => ({ data, mutate, replaceAll, saveState }), [data, mutate, replaceAll, saveState]);
+  const value = useMemo(() => ({ data, mutate, replaceAll, applySync, saveState }), [data, mutate, replaceAll, applySync, saveState]);
   return <StoreCtx.Provider value={value}>{children}</StoreCtx.Provider>;
 }
 

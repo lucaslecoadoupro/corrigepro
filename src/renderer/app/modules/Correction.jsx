@@ -2,10 +2,11 @@ import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useSta
 import { useStore, useToast, findClass, findEval, ensureCopy } from '../store.jsx';
 import { useNav } from '../nav.jsx';
 import { Icon } from '../icons.jsx';
-import { Empty, Menu, useBlobUrl, useConfirm } from '../ui.jsx';
+import { Empty, Menu, Seg, useBlobUrl, useConfirm } from '../ui.jsx';
 import { Shape, PEN_COLORS, HL_COLORS, unit, hitTest, rotateShape } from '../annotations.jsx';
 import { EvalPrintDialog, copyStatus, setMissing, zeroMissing } from './Evals.jsx';
-import { filesToPages, blobs, rotateDataUrl } from '../platform.js';
+import { filesToPages, blobs, rotateDataUrl, storePages, isDesktop } from '../platform.js';
+import { CameraButton } from './Evals.jsx';
 import { uid, fmt, sortStudents, studentName, computeNote, critPoints, clamp, avatarColor, initials } from '../utils.js';
 
 const TOOLS = [
@@ -38,6 +39,7 @@ export function CorrectionPage({ id, student }) {
   const [hlColor, setHlColor] = useState(HL_COLORS[0]);
   const [stamp, setStamp] = useState(data?.settings.stamps?.[0] || '✓');
   const [stampOpen, setStampOpen] = useState(false);
+  const [pane, setPane] = useState('copy');
   const [zoom, setZoom] = useState(1);
   const [rightW, setRightW] = useState(() => Number(localStorage.getItem('cp-right-w')) || 440);
   const [printing, setPrinting] = useState(false);
@@ -145,9 +147,7 @@ export function CorrectionPage({ id, student }) {
   const attach = async (files) => {
     setImporting('Lecture des fichiers…');
     try {
-      const pages = await filesToPages(files, setImporting);
-      const stored = [];
-      for (const p of pages) { const pid = uid('pg'); await blobs.put(pid, p.dataUrl); stored.push({ id: pid, w: p.w, h: p.h, name: p.name }); }
+      const stored = await storePages(await filesToPages(files, setImporting));
       updateCopy((c) => { c.pages.push(...stored); c.absent = false; c.missing = false; });
       if (stored.length) toast(`${stored.length} page(s) ajoutée(s)`);
     } catch (err) { toast(`Import impossible : ${err.message}`, 'error'); } finally { setImporting(null); }
@@ -181,7 +181,11 @@ export function CorrectionPage({ id, student }) {
         <button className="btn btn-ghost btn-sm" onClick={() => setPrinting(true)}><Icon name="printer" />Imprimer</button>
       </div>
 
-      <div className="corr-main">
+      {/* Petit écran : la copie et la grille s'affichent l'une ou l'autre */}
+      <div className="pane-switch">
+        <Seg block value={pane} onChange={setPane} options={[{ value: 'copy', label: 'Copie', icon: 'fileText' }, { value: 'grid', label: `Grille${copy && !copy.absent && computeNote(ev.grid, copy).note != null ? ` · ${fmt(computeNote(ev.grid, copy).note, 2)}` : ''}`, icon: 'grid' }]} />
+      </div>
+      <div className="corr-main" data-pane={pane}>
         <div className="corr-left">
           <Toolbar {...{ tool, setTool, color, setColor, hlColor, setHlColor, stamp, setStamp, stampOpen, setStampOpen, zoom, setZoom, undo, redo, hist, stamps: data.settings.stamps }}
             onClear={copy?.pages?.length ? () => copy.pages.forEach((p) => (copy.ann?.[p.id]?.length ? setPageShapes(p.id, []) : null)) : null}
@@ -275,6 +279,7 @@ function NoCopy({ student, onFiles, busy }) {
         <div className="dropzone-title">{busy || `Ajouter la copie de ${studentName(student, 'prenom')}`}</div>
         <div className="dropzone-sub">Déposez un PDF, des photos ou des scans (JPG, PNG) — ou cliquez pour parcourir.<br />Vous pouvez aussi noter directement avec la grille, sans copie numérisée.</div>
         <input ref={ref} type="file" hidden multiple accept="image/*,.pdf,application/pdf" onChange={(e) => { if (e.target.files.length) onFiles(e.target.files); e.target.value = ''; }} />
+        {!isDesktop && <CameraButton className="btn btn-primary mt-2" onFiles={onFiles} label="Photographier la copie" />}
       </div>
     </div>
   );

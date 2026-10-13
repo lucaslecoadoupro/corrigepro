@@ -44,6 +44,15 @@ export const GRID_TYPES = [
     ],
   },
   {
+    id: 'part', label: 'Participation orale', hint: 'Note de participation en classe, saisie directe',
+    mode: 'points', direct: true, build: () => [
+      c('Fréquence des prises de parole', 5, 'Lève la main, intervient spontanément'),
+      c('Pertinence des interventions', 5, 'Réponses en lien avec le cours, idées utiles'),
+      c('Qualité de la langue', 5, 'Prononciation, lexique, phrases complètes'),
+      c('Écoute et respect', 5, 'Laisse parler les autres, rebondit sur leurs propos'),
+    ],
+  },
+  {
     id: 'ce', label: 'Compréhension écrite', hint: 'Lecture d\'un document',
     mode: 'points', build: () => [
       c('Identification du document', 4, 'Nature, source, thème général'),
@@ -88,19 +97,22 @@ export const GRID_TYPES = [
     ],
   },
   { id: 'custom', label: 'Personnalisée', hint: 'Partir d\'une grille vide', mode: 'points', build: () => [c('Critère 1', 10), c('Critère 2', 10)] },
+  { id: 'part-custom', label: 'Participation personnalisée', hint: 'Vos propres critères, saisie directe', mode: 'points', direct: true, build: () => [c('Critère 1', 10), c('Critère 2', 10)] },
 ];
 
-export function newGrid(typeId = 'ee') {
+export function newGrid(typeId = 'ee', title = '') {
   const t = GRID_TYPES.find((x) => x.id === typeId) || GRID_TYPES[0];
   return {
     id: uid('grid'),
-    title: t.id === 'custom' ? 'Nouvelle grille' : t.label,
+    title: title.trim() || (t.id === 'custom' ? 'Nouvelle grille' : t.label),
     subtitle: '',
     type: t.label,
     typeId: t.id,
     scale: 20,
     rounding: '0.5',
     mode: t.mode,
+    // Saisie directe : notes entrées dans un tableau ou sur le téléphone, sans copie à importer
+    direct: !!t.direct,
     levels: SOCLE_LEVELS.map((l) => ({ ...l })),
     criteria: t.build(),
     orientation: 'portrait',

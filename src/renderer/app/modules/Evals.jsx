@@ -1,13 +1,13 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { useStore, useToast, findClass, findEval, findGrid, ensureCopy, collectGarbage } from '../store.jsx';
+import { useStore, useToast, findClass, findEval, findGrid, ensureCopy } from '../store.jsx';
 import { useNav } from '../nav.jsx';
 import { Icon } from '../icons.jsx';
 import { PageHeader, Empty, Modal, Field, Menu, useConfirm, Seg, useBlobUrl } from '../ui.jsx';
 import { buildGridSheets, SideBySideSheets, SequentialSheets } from '../sheets.jsx';
 import { PrintDialog } from '../print.jsx';
 import { NewGridModal, teacherLine } from './Grids.jsx';
-import { filesToPages, blobs } from '../platform.js';
-import { uid, deep, todayISO, fmt, fmtDate, sortStudents, studentName, initials, avatarColor, copyNote, computeNote, evalStats, to20, noteClass } from '../utils.js';
+import { filesToPages, blobs, storePages, isDesktop } from '../platform.js';
+import { uid, deep, setCritValue, todayISO, fmt, fmtDate, sortStudents, studentName, initials, avatarColor, copyNote, computeNote, evalStats, to20, noteClass } from '../utils.js';
 
 const STATUS = {
   todo: { label: 'À corriger', color: 'var(--text3)' },
@@ -75,7 +75,7 @@ export function EvalListItem({ ev, onClick, compact }) {
         <div className="li-title">{ev.title}</div>
         <div className="li-sub">{cls?.name || 'Classe supprimée'} · {fmtDate(ev.date)} · {ev.grid.type} · /{ev.grid.scale}</div>
       </div>
-      {!compact && <div style={{ width: 160 }}>
+      {!compact && <div className="li-progress" style={{ width: 160 }}>
         <div className="row" style={{ justifyContent: 'space-between', fontSize: '.68rem', color: 'var(--text2)', marginBottom: 3 }}><span>{st.corrected}/{total} corrigées</span><span>{Math.round(pct)} %</span></div>
         <div className={`progress ${pct >= 100 ? 'success' : ''}`}><div style={{ width: `${pct}%` }} /></div>
       </div>}
@@ -174,12 +174,14 @@ export function EvalPage({ id }) {
   const [modal, setModal] = useState(null);
   const [busy, setBusy] = useState(null);
   const [over, setOver] = useState(null);
+  const [view, setView] = useState(null);
   const ev = findEval(data, id);
   const cls = ev && findClass(data, ev.classId);
   if (!ev || !cls) return <Empty icon="clipboard" title="Évaluation introuvable" />;
   const students = sortStudents(cls.students);
   const st = evalStats(ev, students);
   const total = students.length - st.absent;
+  const v = view || (ev.grid.direct ? 'saisie' : 'copies');
 
   const firstTodo = students.find((s) => !['done', 'absent', 'missing'].includes(copyStatus(ev.copies?.[s.id])))?.id || students[0]?.id;
 
@@ -188,8 +190,7 @@ export function EvalPage({ id }) {
     try {
       const pages = await filesToPages(files, (m) => setBusy(m));
       if (!pages.length) { toast('Aucune image ou PDF reconnu', 'error'); return; }
-      const stored = [];
-      for (const p of pages) { const pid = uid('pg'); await blobs.put(pid, p.dataUrl); stored.push({ id: pid, w: p.w, h: p.h, name: p.name }); }
+      const stored = await storePages(pages);
       mutate((d) => { const c = ensureCopy(findEval(d, id), sid); c.pages.push(...stored); c.absent = false; c.missing = false; });
       toast(`${stored.length} page(s) ajoutée(s) à la copie`);
     } catch (e) { toast(`Import impossible : ${e.message}`, 'error'); } finally { setBusy(null); }
@@ -226,8 +227,9 @@ export function EvalPage({ id }) {
               { icon: 'trash', label: 'Supprimer l\'évaluation', danger: true, onClick: remove },
             ]} />
           <button className="btn btn-ghost" onClick={() => setModal('print')}><Icon name="printer" />Imprimer</button>
-          <button className="btn btn-ghost" onClick={() => setModal('import')}><Icon name="upload" />Importer des copies</button>
-          <button className="btn btn-white" onClick={() => nav({ page: 'correct', id, student: firstTodo })}><Icon name="pen" />{st.corrected ? 'Continuer la correction' : 'Commencer la correction'}</button>
+          {v === 'copies' && !isDesktop && <button className="btn btn-ghost" onClick={() => setModal('photos')}><Icon name="camera" />Photographier</button>}
+          {v === 'copies' && <button className="btn btn-ghost" onClick={() => setModal('import')}><Icon name="upload" />Importer des copies</button>}
+          {v === 'copies' && <button className="btn btn-white" onClick={() => nav({ page: 'correct', id, student: firstTodo })}><Icon name="pen" />{st.corrected ? 'Continuer la correction' : 'Commencer la correction'}</button>}
         </>}
         stats={[
           { label: 'Corrigées', value: `${st.corrected}`, unit: `/${total}` },
@@ -238,7 +240,10 @@ export function EvalPage({ id }) {
         ]} />
       <div className="page-content">
         {busy && <div className="sum-bar ok" style={{ marginBottom: '1rem', background: 'var(--accent-soft)', color: 'var(--accent)' }}><Icon name="upload" /><span>{busy}</span></div>}
-        <div className="card">
+        <div className="row-wrap" style={{ marginBottom: '1rem' }}>
+          <Seg value={v} onChange={setView} options={[{ value: 'copies', label: 'Copies', icon: 'fileText' }, { value: 'saisie', label: 'Saisie rapide des notes', icon: 'edit' }]} />
+        </div>
+        {v === 'saisie' ? <QuickEntry ev={ev} students={students} nameOrder={data.settings.nameOrder} editCopy={editCopy} toggleAbsent={toggleAbsent} /> : <div className="card">
           <div className="card-hd">
             <div className="card-title"><Icon name="users" />Copies des élèves</div>
             <span className="card-sub">Astuce : glissez un fichier sur la ligne d'un élève pour l'associer à sa copie.</span>
@@ -283,12 +288,106 @@ export function EvalPage({ id }) {
               );
             })}
           </div>
-        </div>
+        </div>}
       </div>
+      {modal === 'photos' && <PhotoRound ev={ev} students={students} attachTo={attachTo} busy={busy} onAbsent={toggleAbsent} onClose={() => setModal(null)} />}
       {modal === 'edit' && <EvalModal ev={ev} onClose={() => setModal(null)} />}
       {modal === 'import' && <BulkImportModal ev={ev} students={students} onClose={() => setModal(null)} />}
       {(modal === 'print' || modal?.print) && <EvalPrintDialog ev={ev} cls={cls} onlyStudent={modal?.print} onClose={() => setModal(null)} />}
     </>
+  );
+}
+
+// Saisie directe des points critère par critère, sans copie numérisée (participation orale…)
+function QuickEntry({ ev, students, nameOrder, editCopy, toggleAbsent }) {
+  const crits = ev.grid.criteria.filter((c) => c.kind !== 'section');
+  const niveaux = ev.grid.mode === 'niveaux';
+  const setValue = (sid, crit, raw) => editCopy(sid, (c) => setCritValue(ev.grid, c, crit.id, raw));
+  return (
+    <div className="card">
+      <div className="card-hd">
+        <div className="card-title"><Icon name="edit" />Saisie des notes</div>
+        <span className="card-sub">Une ligne complète est validée automatiquement et compte dans la moyenne.</span>
+      </div>
+      <div className="table-wrap" style={{ border: 'none', borderRadius: 0 }}>
+        <table className="table">
+          <thead><tr>
+            <th className="sticky-col">Élève</th>
+            {crits.map((cr) => <th key={cr.id} className="num" title={cr.desc || cr.label} style={{ whiteSpace: 'normal', minWidth: 90 }}>{cr.label}<br /><span style={{ fontWeight: 500 }}>/{fmt(Number(cr.max) || 0)}</span></th>)}
+            <th className="num">Note /{ev.grid.scale}</th>
+            <th className="num">Absent</th>
+          </tr></thead>
+          <tbody>
+            {students.map((s) => {
+              const c = ev.copies?.[s.id];
+              const n = copyNote(ev, s.id);
+              return (
+                <tr key={s.id} style={c?.absent ? { opacity: 0.5 } : undefined}>
+                  <td className="sticky-col" style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>{studentName(s, nameOrder)}</td>
+                  {crits.map((cr) => (
+                    <td key={cr.id} className="num">
+                      {niveaux ? (
+                        <select className="select input-sm" disabled={c?.absent} value={c?.levels?.[cr.id] ?? ''} onChange={(e) => setValue(s.id, cr, e.target.value)} aria-label={`${cr.label} — ${studentName(s)}`}>
+                          <option value="">–</option>
+                          {ev.grid.levels.map((l, i) => <option key={i} value={i}>{l.short}</option>)}
+                        </select>
+                      ) : (
+                        <input className="input input-sm tnum" style={{ width: 64, textAlign: 'center' }} type="number" min="0" max={cr.max} step="0.25" disabled={c?.absent}
+                          value={c?.scores?.[cr.id] ?? ''} onChange={(e) => setValue(s.id, cr, e.target.value)} aria-label={`${cr.label} — ${studentName(s)}`} />
+                      )}
+                    </td>
+                  ))}
+                  <td className="num">{c?.absent ? <span className="note-chip n-x">Abs</span> : n != null ? <span className={`note-chip ${noteClass(to20(n, ev.grid.scale))}`}>{fmt(n, 2)}</span> : <span className="note-chip n-x">–</span>}</td>
+                  <td className="num"><input type="checkbox" checked={!!c?.absent} onChange={() => toggleAbsent(s.id)} aria-label={`Absent — ${studentName(s)}`} /></td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// Ouvre directement l'appareil photo (une photo = une page)
+export function CameraButton({ onFiles, label, className = 'btn btn-primary' }) {
+  return (
+    <label className={className} style={{ cursor: 'pointer' }} onClick={(e) => e.stopPropagation()}>
+      <Icon name="camera" />{label}
+      <input type="file" hidden accept="image/*" capture="environment" onChange={(e) => { if (e.target.files.length) onFiles(e.target.files); e.target.value = ''; }} />
+    </label>
+  );
+}
+
+// Tour de classe au téléphone : on photographie les copies élève par élève
+function PhotoRound({ ev, students, attachTo, busy, onAbsent, onClose }) {
+  const { data } = useStore();
+  const queue = students.filter((s) => !ev.copies?.[s.id]?.absent);
+  const [i, setI] = useState(() => Math.max(0, queue.findIndex((s) => !(ev.copies?.[s.id]?.pages || []).length)));
+  const s = queue[i];
+  if (!s) return null;
+  const pages = ev.copies?.[s.id]?.pages || [];
+  const last = i >= queue.length - 1;
+  const next = () => (last ? onClose() : setI(i + 1));
+  return (
+    <Modal title="Photographier les copies" sub={`${ev.title} · élève ${i + 1} sur ${queue.length}`} icon="camera" onClose={onClose}
+      footer={<>
+        <button className="btn" disabled={i === 0} onClick={() => setI(i - 1)}><Icon name="chevronLeft" />Précédent</button>
+        <button className="btn btn-primary" onClick={next}>{last ? 'Terminer' : 'Élève suivant'}<Icon name={last ? 'check' : 'chevronRight'} /></button>
+      </>}>
+      <div className="stack" style={{ gap: '.9rem', alignItems: 'center', textAlign: 'center' }}>
+        <div className="avatar" style={{ background: avatarColor(s.id), width: 48, height: 48, fontSize: '.95rem' }}>{initials(s)}</div>
+        <div className="slab" style={{ fontSize: '1.15rem', fontWeight: 800 }}>{studentName(s, data.settings.nameOrder)}</div>
+        <div className="thumbs" style={{ justifyContent: 'center', minHeight: 40 }}>
+          {pages.length ? pages.map((p) => <Thumb key={p.id} id={p.id} />) : <span className="faint" style={{ fontSize: '.78rem' }}>Aucune page pour l'instant</span>}
+        </div>
+        {busy ? <div className="faint">{busy}</div> : (
+          <CameraButton className="btn btn-primary btn-block" onFiles={(f) => attachTo(s.id, f)} label={pages.length ? `Ajouter la page ${pages.length + 1}` : 'Photographier la page 1'} />
+        )}
+        <button className="btn btn-quiet btn-sm" onClick={() => { onAbsent(s.id); if (last) onClose(); }}>Absent(e) — passer</button>
+        <div className="faint" style={{ fontSize: '.72rem', lineHeight: 1.45 }}>Posez la copie à plat, bien éclairée, et cadrez la page entière. Une photo par page.</div>
+      </div>
+    </Modal>
   );
 }
 
@@ -356,9 +455,7 @@ function BulkImportModal({ ev, students, onClose }) {
       const plan = [];
       for (let g = 0; g < groups.length; g++) {
         const sid = assign[g]; if (!sid) continue;
-        const stored = [];
-        for (const i of groups[g].idx) { const pid = uid('pg'); await blobs.put(pid, pages[i].dataUrl); stored.push({ id: pid, w: pages[i].w, h: pages[i].h, name: pages[i].name }); }
-        plan.push([sid, stored]);
+        plan.push([sid, await storePages(groups[g].idx.map((i) => pages[i]))]);
       }
       mutate((d) => { const e = findEval(d, ev.id); plan.forEach(([sid, st]) => { const c = ensureCopy(e, sid); c.pages.push(...st); c.absent = false; c.missing = false; }); });
       toast(`${plan.length} copie(s) importée(s)`);

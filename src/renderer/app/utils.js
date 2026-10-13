@@ -156,6 +156,17 @@ export function computeNote(grid, copy) {
   return { raw, max, note, scale, filled, total: crits.length, complete: crits.length > 0 && filled === crits.length };
 }
 
+// Saisie directe d'un critère (tableau de saisie, téléphone) ; met à jour le statut de la copie.
+export function setCritValue(grid, copy, critId, value) {
+  const crit = grid.criteria.find((c) => c.id === critId && c.kind !== 'section');
+  if (!crit) return;
+  const n = value == null || value === '' ? NaN : Number(String(value).replace(',', '.'));
+  if (grid.mode === 'niveaux') copy.levels[critId] = grid.levels[n] ? n : null;
+  else copy.scores[critId] = Number.isNaN(n) ? null : clamp(n, 0, Number(crit.max) || 0);
+  const r = computeNote(grid, copy);
+  copy.status = r.complete ? 'done' : r.filled ? 'progress' : 'todo';
+}
+
 // Note d'une copie dans une évaluation (null si absent / non rendu / non noté).
 // onlyDone : ne compte que les copies validées (moyennes, statistiques).
 export function copyNote(ev, studentId, onlyDone = false) {

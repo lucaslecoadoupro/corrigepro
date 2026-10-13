@@ -13,9 +13,11 @@
   "scripts": {
     "build:renderer": "node scripts/build.mjs",
     "build:web": "node scripts/build.mjs --web",
+    "build:pwa": "node scripts/build.mjs --pwa",
     "watch": "node scripts/build.mjs --watch",
     "start": "npm run build:renderer && electron .",
     "dev": "npm run build:renderer && electron . --dev",
+    "test": "node --no-warnings scripts/sync.test.mjs",
     "dist:mac": "npm run build:renderer && electron-builder --mac --publish never",
     "dist:win": "npm run build:renderer && electron-builder --win --publish never",
     "dist:all": "npm run build:renderer && electron-builder --mac --win --publish never"
