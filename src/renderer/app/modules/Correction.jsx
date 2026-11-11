@@ -95,18 +95,52 @@ export function CorrectionPage({ id, student }) {
     if (c.status === 'todo') c.status = 'progress';
   }), [mutate, id, sid]);
 
-  const go = (dir) => { const n = students[idx + dir]; if (n) setSid(n.id); };
-  const nextTodo = () => {
-    for (let k = 1; k <= students.length; k++) {
-      const n = students[(idx + k) % students.length];
-      const st = copyStatus(ev.copies?.[n.id]);
-      if (st !== 'done' && st !== 'absent' && st !== 'missing') return n.id;
+  // ── Évaluation de groupe ─────────────────────────────────────────────────
+  // ev.groups = [{ id, members: [studentId], individual: [critId] }] ; chaque élève garde sa copie,
+  // les critères communs sont recopiés sur les copies de tous les membres.
+  const group = ev?.groups?.find((g) => g.members.includes(sid));
+  const updateGroup = useCallback((fn) => mutate((d) => {
+    const e = findEval(d, id);
+    const g = e.groups?.find((x) => x.members.includes(sid));
+    for (const m of g ? g.members : [sid]) {
+      const c = ensureCopy(e, m);
+      fn(c, (cid) => m === sid || !g.individual.includes(cid));
+      if (c.status === 'todo') c.status = 'progress';
     }
-    return null;
+  }), [mutate, id, sid]);
+  const editGroup = (fn) => mutate((d) => {
+    const e = findEval(d, id);
+    e.groups = e.groups || [];
+    let g = e.groups.find((x) => x.members.includes(sid));
+    if (!g) { g = { id: uid('g'), members: [sid], individual: [] }; e.groups.push(g); }
+    fn(g, e);
+    e.groups = e.groups.filter((x) => x.members.length > 1);
+  });
+  const addMember = (m) => editGroup((g, e) => {
+    e.groups.forEach((x) => { x.members = x.members.filter((y) => y !== m); });
+    g.members.push(m);
+    // le nouveau membre reçoit les notes communes déjà saisies
+    const src = ensureCopy(e, sid); const c = ensureCopy(e, m);
+    e.grid.criteria.filter((x) => x.kind !== 'section' && !g.individual.includes(x.id)).forEach((x) => {
+      if (src.scores?.[x.id] != null) c.scores = { ...c.scores, [x.id]: src.scores[x.id] };
+      if (src.levels?.[x.id] != null) c.levels = { ...c.levels, [x.id]: src.levels[x.id] };
+      if (c.status === 'todo') c.status = 'progress';
+    });
+  });
+  const removeMember = (m) => editGroup((g) => { g.members = g.members.filter((y) => y !== m); });
+  const toggleIndividual = (cid) => editGroup((g) => { g.individual = g.individual.includes(cid) ? g.individual.filter((x) => x !== cid) : [...g.individual, cid]; });
+
+  const go = (dir) => { const n = students[idx + dir]; if (n) setSid(n.id); };
+  // Prochaine copie à corriger : d'abord les autres membres du groupe, puis la suite de la liste
+  const nextTodo = (skip) => {
+    const rot = students.map((_, k) => students[(idx + 1 + k) % students.length].id);
+    return [...(group?.members || []), ...rot].find((m) => !skip.includes(m) && !['done', 'absent', 'missing'].includes(copyStatus(ev.copies?.[m])));
   };
   const validate = () => {
-    mutate((d) => { ensureCopy(findEval(d, id), sid).status = 'done'; });
-    const n = nextTodo();
+    // grille entièrement commune : on valide tout le groupe d'un coup
+    const done = group && !group.individual.length ? group.members : [sid];
+    mutate((d) => { const e = findEval(d, id); done.forEach((m) => { const c = ensureCopy(e, m); if (m === sid || (!c.absent && !c.missing)) c.status = 'done'; }); });
+    const n = nextTodo(done);
     if (n && n !== sid) { setSid(n); toast(`Copie validée — au tour de ${studentName(students.find((x) => x.id === n), 'prenom')}`); } else toast('Toutes les copies sont corrigées 🎉');
   };
 
@@ -202,7 +236,8 @@ export function CorrectionPage({ id, student }) {
         </div>
         <div className="corr-split" onPointerDown={startResize} title="Redimensionner" />
         <div className="corr-right" style={{ width: rightW }}>
-          <ScorePanel key={sid} ev={ev} copy={copy} student={s} updateCopy={updateCopy} onValidate={validate} settings={data.settings}
+          <ScorePanel key={sid} ev={ev} copy={copy} student={s} updateCopy={updateCopy} updateGroup={updateGroup} onValidate={validate} settings={data.settings}
+            students={students} group={group} nameOrder={data.settings.nameOrder} onAddMember={addMember} onRemoveMember={removeMember} onToggleIndividual={toggleIndividual}
             onAbsent={() => updateCopy((c) => { c.absent = !c.absent; c.missing = false; if (c.absent) c.status = 'todo'; })}
             onMissing={() => updateCopy((c) => setMissing(c, !c.missing))} onZero={() => updateCopy(zeroMissing)} />
         </div>
@@ -477,7 +512,7 @@ function quickValues(max) {
   return [0, max / 4, max / 2, (3 * max) / 4, max].map((x) => Math.round(x * 2) / 2);
 }
 
-function ScorePanel({ ev, copy, student, updateCopy, onValidate, onAbsent, onMissing, onZero, settings }) {
+function ScorePanel({ ev, copy, student, updateCopy, updateGroup, onValidate, onAbsent, onMissing, onZero, settings, students, group, nameOrder, onAddMember, onRemoveMember, onToggleIndividual }) {
   const grid = ev.grid;
   const res = computeNote(grid, copy);
   const manual = copy?.manualNote != null && copy.manualNote !== '';
@@ -486,11 +521,11 @@ function ScorePanel({ ev, copy, student, updateCopy, onValidate, onAbsent, onMis
   const [showManual, setShowManual] = useState(manual);
   useEffect(() => setShowManual(manual), [student.id]); // eslint-disable-line
 
-  const setScore = (cid, v) => updateCopy((c) => { c.scores = { ...c.scores, [cid]: v }; });
-  const setLevel = (cid, li) => updateCopy((c) => { const cur = c.levels?.[cid]; c.levels = { ...c.levels, [cid]: cur === li ? null : li }; });
+  const setScore = (cid, v) => updateGroup((c, shared) => { if (shared(cid)) c.scores = { ...c.scores, [cid]: v }; });
+  const setLevel = (cid, li) => { const v = copy?.levels?.[cid] === li ? null : li; updateGroup((c, shared) => { if (shared(cid)) c.levels = { ...c.levels, [cid]: v }; }); };
   const appendComment = (t) => updateCopy((c) => { c.comment = c.comment ? `${c.comment.replace(/\s+$/, '')} ${t}` : t; });
-  const fullMarks = () => updateCopy((c) => {
-    grid.criteria.filter((x) => x.kind !== 'section').forEach((x) => {
+  const fullMarks = () => updateGroup((c, shared) => {
+    grid.criteria.filter((x) => x.kind !== 'section' && shared(x.id)).forEach((x) => {
       if (grid.mode === 'niveaux') c.levels = { ...c.levels, [x.id]: grid.levels.length - 1 };
       else c.scores = { ...c.scores, [x.id]: x.max };
     });
@@ -521,13 +556,31 @@ function ScorePanel({ ev, copy, student, updateCopy, onValidate, onAbsent, onMis
       </div>
 
       <div className="panel-scroll scroll">
+        <div className="section-label">Groupe</div>
+        <div className="chips">
+          {(group?.members || []).filter((m) => m !== student.id).map((m) => {
+            const x = students.find((y) => y.id === m);
+            return x && <button key={m} className="chip" onClick={() => onRemoveMember(m)} title="Retirer du groupe">{studentName(x, nameOrder)} ✕</button>;
+          })}
+          <select className="input input-sm" style={{ width: 'auto' }} value="" onChange={(e) => e.target.value && onAddMember(e.target.value)}>
+            <option value="">{group ? '+ Ajouter un membre…' : '+ Évaluer en groupe avec…'}</option>
+            {students.filter((x) => x.id !== student.id && !group?.members.includes(x.id)).map((x) => (
+              <option key={x.id} value={x.id}>{studentName(x, nameOrder)}{ev.groups?.some((g) => g.members.includes(x.id)) ? ' (autre groupe)' : ''}</option>
+            ))}
+          </select>
+        </div>
+        {group && <div className="field-hint mt-1">Les critères sont notés pour tout le groupe. Cliquez sur l'icône d'un critère pour le noter individuellement.</div>}
+
         {grid.criteria.map((c) => {
           if (c.kind === 'section') return <div key={c.id} className="section-label">{c.label}</div>;
           const pts = critPoints(grid, copy, c);
+          const indiv = group?.individual.includes(c.id);
           return (
             <div key={c.id} className={`crit ${pts != null ? 'filled' : ''}`}>
               <div className="crit-hd">
                 <div className="crit-label">{c.label}{c.desc && <div className="crit-desc">{c.desc}</div>}</div>
+                {group && <button className="btn btn-quiet btn-icon btn-sm" style={{ color: indiv ? 'var(--accent)' : 'var(--text3)' }} onClick={() => onToggleIndividual(c.id)}
+                  title={indiv ? 'Critère individuel — cliquer pour le rendre commun au groupe' : 'Critère commun au groupe — cliquer pour le noter individuellement'}><Icon name={indiv ? 'user' : 'users'} /></button>}
                 {grid.mode === 'niveaux' ? (
                   <div className="crit-max">{pts != null ? <b style={{ color: 'var(--text)', fontSize: '.84rem' }}>{fmt(pts, 2)}</b> : '–'} / {fmt(c.max, 2)}</div>
                 ) : (
